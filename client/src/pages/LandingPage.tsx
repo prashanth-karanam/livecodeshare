@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Code2,
@@ -12,8 +12,12 @@ import {
   Sparkles,
   BookOpen,
   Calendar,
-  Clock
+  Clock,
+  Copy,
+  Check,
+  Loader2
 } from 'lucide-react';
+import { getApiUrl } from '../utils/api';
 
 interface LandingPageProps {
   onCreateRoom: (customName: string) => void;
@@ -28,6 +32,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 }) => {
   const [roomIdInput, setRoomIdInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [isTunnelLoading, setIsTunnelLoading] = useState<boolean>(false);
+  const [copiedTunnel, setCopiedTunnel] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetch(getApiUrl('/api/tunnel/status'))
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.url) setTunnelUrl(data.url);
+        if (data.isStarting) setIsTunnelLoading(true);
+      })
+      .catch(() => {});
+
+    const interval = setInterval(() => {
+      fetch(getApiUrl('/api/tunnel/status'))
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.url) {
+            setTunnelUrl(d.url);
+            setIsTunnelLoading(false);
+          }
+        })
+        .catch(() => {});
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleStartTunnel = async () => {
+    setIsTunnelLoading(true);
+    try {
+      const res = await fetch(getApiUrl('/api/tunnel/start'), { method: 'POST' });
+      const data = await res.json();
+      if (data.url) setTunnelUrl(data.url);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsTunnelLoading(false);
+    }
+  };
+
+  const copyTunnelUrl = () => {
+    if (!tunnelUrl) return;
+    navigator.clipboard.writeText(tunnelUrl);
+    setCopiedTunnel(true);
+    setTimeout(() => setCopiedTunnel(false), 2000);
+  };
 
   const handleCreate = () => {
     confetti({
@@ -183,6 +234,59 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </button>
               </form>
             </div>
+          </div>
+
+          {/* 24/7 Cloudflare Public Link Box */}
+          <div className="max-w-md mx-auto mt-4 p-4 rounded-2xl bg-slate-900/90 border border-cyan-500/30 shadow-xl backdrop-blur-md text-left space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-cyan-300 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                24/7 Worldwide Link (Different Wi-Fi / Cellular):
+              </span>
+              {tunnelUrl && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
+                  ● 24/7 Active
+                </span>
+              )}
+            </div>
+
+            {tunnelUrl ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={tunnelUrl}
+                    className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/40 rounded-xl text-xs font-mono text-cyan-200 select-all focus:outline-none"
+                  />
+                  <button
+                    onClick={copyTunnelUrl}
+                    className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-cyan-600/30"
+                  >
+                    {copiedTunnel ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedTunnel ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Send this link to friends on <strong>any device or network</strong>. It remains online 24/7 as long as your laptop is on!
+                </p>
+              </div>
+            ) : isTunnelLoading ? (
+              <div className="flex items-center gap-2 py-2 text-xs text-cyan-400">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Generating your 24/7 Cloudflare public link...</span>
+              </div>
+            ) : (
+              <div className="pt-1 flex items-center justify-between gap-3">
+                <p className="text-[11px] text-slate-400">Invite friends outside your home Wi-Fi</p>
+                <button
+                  onClick={handleStartTunnel}
+                  className="px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-lg text-xs font-semibold shadow-md transition"
+                >
+                  Generate Public Link
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>

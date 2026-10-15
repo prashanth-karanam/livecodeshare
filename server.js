@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { startTunnel } from 'untun';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,37 @@ app.use(express.json());
 
 // In-memory room store
 const rooms = new Map();
+
+// Cloudflare 24/7 Tunnel State
+let activeTunnel = null;
+let activeTunnelUrl = null;
+let isTunnelStarting = false;
+
+async function startCloudflareTunnel(port) {
+  if (activeTunnelUrl) return activeTunnelUrl;
+  if (isTunnelStarting) {
+    while (isTunnelStarting) {
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return activeTunnelUrl;
+  }
+
+  isTunnelStarting = true;
+  try {
+    activeTunnel = await startTunnel({ port });
+    activeTunnelUrl = await activeTunnel.getURL();
+    console.log(`\n======================================================`);
+    console.log(`🌍 Cloudflare 24/7 Public Link: ${activeTunnelUrl}`);
+    console.log(`⚡ Share this link with friends anywhere in the world!`);
+    console.log(`======================================================\n`);
+    return activeTunnelUrl;
+  } catch (err) {
+    console.error('Failed to start Cloudflare tunnel:', err.message);
+    return null;
+  } finally {
+    isTunnelStarting = false;
+  }
+}
 
 const USER_COLORS = [
   '#06b6d4', // cyan
@@ -372,14 +404,12 @@ app.post('/api/execute', async (req, res) => {
     // 2. JavaScript / TypeScript execution (Local Node.js)
     if (language === 'javascript' || language === 'typescript') {
       const scriptPath = path.join(tempDir, 'main.mjs');
-      // Simple strip of standard TypeScript types if user wrote basic TS
-      let runnableCode = code;
-      fs.writeFileSync(scriptPath, runnableCode);
+      fs.writeFileSync(scriptPath, code);
       const result = await runCommandInSandbox(process.execPath, [scriptPath], { cwd: tempDir }, stdin);
       return res.json({ run: result });
     }
 
-    // 3. C++ execution (Local g++ or Wandbox)
+    // 3. C++ execution (Local g++)
     if (language === 'cpp') {
       const srcPath = path.join(tempDir, 'main.cpp');
       const exePath = path.join(tempDir, 'main.exe');
@@ -400,7 +430,7 @@ app.post('/api/execute', async (req, res) => {
       return res.json({ run: runResult });
     }
 
-    // 4. C execution (Local gcc or Wandbox)
+    // 4. C execution (Local gcc)
     if (language === 'c') {
       const srcPath = path.join(tempDir, 'main.c');
       const exePath = path.join(tempDir, 'main.exe');
@@ -436,14 +466,31 @@ app.post('/api/execute', async (req, res) => {
 
     return res.status(400).json({ error: `Language "${language}" execution is not configured.` });
   } finally {
-    // Clean up temp directory
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
     } catch (e) {}
   }
 });
 
-// API: Network information for sharing with devices on local Wi-Fi
+// API: Cloudflare Tunnel Status & Start
+app.get('/api/tunnel/status', (req, res) => {
+  res.json({
+    active: !!activeTunnelUrl,
+    url: activeTunnelUrl,
+    isStarting: isTunnelStarting
+  });
+});
+
+app.post('/api/tunnel/start', async (req, res) => {
+  const port = process.env.PORT || 3000;
+  const url = await startCloudflareTunnel(port);
+  res.json({
+    active: !!url,
+    url
+  });
+});
+
+// API: Network information for sharing with devices on local Wi-Fi & worldwide
 app.get('/api/network-info', (req, res) => {
   const interfaces = os.networkInterfaces();
   const addresses = [];
@@ -459,7 +506,7 @@ app.get('/api/network-info', (req, res) => {
     }
   }
 
-  // Prioritize Wi-Fi and Ethernet over virtual VPN adapters (CloudflareWARP, WSL, etc.)
+  // Prioritize Wi-Fi and Ethernet
   addresses.sort((a, b) => {
     const isWifiA = /wi-?fi|wlan|ethernet|local area/i.test(a.interface);
     const isWifiB = /wi-?fi|wlan|ethernet|local area/i.test(b.interface);
@@ -474,7 +521,9 @@ app.get('/api/network-info', (req, res) => {
   res.json({
     port,
     addresses,
-    preferredUrl: `http://${preferredIp}:${port}`
+    preferredUrl: `http://${preferredIp}:${port}`,
+    tunnelUrl: activeTunnelUrl,
+    isTunnelStarting
   });
 });
 
@@ -501,9 +550,12 @@ server.listen(PORT, '0.0.0.0', () => {
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        console.log(`📱 Friends/Devices URL (${name}): http://${iface.address}:${PORT}`);
+        console.log(`📱 Wi-Fi URL (${name}): http://${iface.address}:${PORT}`);
       }
     }
   }
   console.log(`======================================================\n`);
+
+  // Automatically start the 24/7 Cloudflare public tunnel in background
+  startCloudflareTunnel(PORT).catch(() => {});
 });

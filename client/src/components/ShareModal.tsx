@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, X, Smartphone, Globe, Wifi } from 'lucide-react';
+import { Copy, Check, X, Globe, Wifi, Sparkles, Loader2 } from 'lucide-react';
 import { getApiUrl } from '../utils/api';
 
 interface ShareModalProps {
@@ -12,35 +12,80 @@ interface ShareModalProps {
 export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
+  const [copiedPublic, setCopiedPublic] = useState(false);
+
+  const [linkType, setLinkType] = useState<'public' | 'wifi'>('public');
   const [networkUrl, setNetworkUrl] = useState<string>('');
-  const [networkList, setNetworkList] = useState<{ interface: string; ip: string }[]>([]);
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [isTunnelLoading, setIsTunnelLoading] = useState<boolean>(false);
 
-  const currentOrigin = window.location.origin;
   const roomPath = `/room/${roomId}`;
-  const shareableUrl = `${currentOrigin}${roomPath}`;
 
-  useEffect(() => {
+  const fetchNetworkInfo = () => {
     fetch(getApiUrl('/api/network-info'))
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         if (data.addresses && data.addresses.length > 0) {
-          setNetworkList(data.addresses);
           setNetworkUrl(`http://${data.addresses[0].ip}:${data.port || 3000}${roomPath}`);
+        } else {
+          setNetworkUrl(`${window.location.origin}${roomPath}`);
+        }
+        if (data.tunnelUrl) {
+          setTunnelUrl(`${data.tunnelUrl}${roomPath}`);
+        }
+        if (data.isTunnelStarting) {
+          setIsTunnelLoading(true);
         }
       })
       .catch(() => {
-        // Fallback to current origin
-        setNetworkUrl(shareableUrl);
+        setNetworkUrl(`${window.location.origin}${roomPath}`);
       });
-  }, [roomId, roomPath, shareableUrl]);
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchNetworkInfo();
+
+      // Poll tunnel status if not active yet
+      const interval = setInterval(() => {
+        fetch(getApiUrl('/api/tunnel/status'))
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.url) {
+              setTunnelUrl(`${d.url}${roomPath}`);
+              setIsTunnelLoading(false);
+            }
+          })
+          .catch(() => {});
+      }, 2000);
+
+      return () => clearInterval(interval);
+    }
+  }, [isOpen, roomId, roomPath]);
 
   if (!isOpen) return null;
 
-  const activeQrUrl = networkUrl || shareableUrl;
+  const handleStartTunnel = async () => {
+    setIsTunnelLoading(true);
+    try {
+      const res = await fetch(getApiUrl('/api/tunnel/start'), { method: 'POST' });
+      const data = await res.json();
+      if (data.url) {
+        setTunnelUrl(`${data.url}${roomPath}`);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsTunnelLoading(false);
+    }
+  };
 
-  const copyToClipboard = (text: string, isLink: boolean) => {
+  const copyToClipboard = (text: string, type: 'link' | 'id' | 'public') => {
     navigator.clipboard.writeText(text);
-    if (isLink) {
+    if (type === 'public') {
+      setCopiedPublic(true);
+      setTimeout(() => setCopiedPublic(false), 2000);
+    } else if (type === 'link') {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     } else {
@@ -49,18 +94,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
     }
   };
 
+  const activeUrl = linkType === 'public' && tunnelUrl ? tunnelUrl : networkUrl || `${window.location.origin}${roomPath}`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-slate-100 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              <Smartphone className="w-5 h-5" />
+              <Globe className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-white">Invite Friends to Code</h3>
-              <p className="text-xs text-slate-400">Scan with phone/tablet or send room link</p>
+              <h3 className="text-lg font-bold text-white">Share Live Room with Friends</h3>
+              <p className="text-xs text-slate-400">Generate links for friends on any network or mobile data</p>
             </div>
           </div>
           <button
@@ -71,81 +118,149 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
           </button>
         </div>
 
+        {/* Mode Switcher Tabs */}
+        <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 mt-4 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setLinkType('public')}
+            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition ${
+              linkType === 'public'
+                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>24/7 Worldwide Link (Different Wi-Fi / Cellular)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLinkType('wifi')}
+            className={`py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition ${
+              linkType === 'wifi'
+                ? 'bg-slate-800 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Wifi className="w-3.5 h-3.5" />
+            <span>Same Wi-Fi</span>
+          </button>
+        </div>
+
         {/* Content */}
-        <div className="py-5 flex flex-col items-center">
+        <div className="py-4 flex flex-col items-center">
           {/* QR Code Container */}
-          <div className="p-4 bg-white rounded-2xl shadow-inner border-4 border-cyan-500/30 flex flex-col items-center justify-center">
+          <div className="p-3.5 bg-white rounded-2xl shadow-inner border-4 border-cyan-500/30 flex flex-col items-center justify-center">
             <QRCodeSVG
-              value={activeQrUrl}
-              size={180}
+              value={activeUrl}
+              size={170}
               level="M"
               includeMargin={false}
             />
           </div>
-          <p className="mt-3 text-xs text-slate-400 text-center flex items-center gap-1.5">
+          <p className="mt-2 text-xs text-slate-400 text-center flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Point any phone or tablet camera to open instantly
+            Point phone or tablet camera to open instantly
           </p>
 
-          {/* Quick Copy Link */}
-          <div className="w-full mt-5 space-y-3">
-            <div>
-              <label className="text-xs font-medium text-slate-300 mb-1.5 block">
-                Direct Room Link
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={activeQrUrl}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none"
-                />
-                <button
-                  onClick={() => copyToClipboard(activeQrUrl, true)}
-                  className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-cyan-600/20"
-                >
-                  {copiedLink ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copiedLink ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
+          {/* Public 24/7 Link Section */}
+          {linkType === 'public' && (
+            <div className="w-full mt-4 space-y-3">
+              {tunnelUrl ? (
+                <div className="p-3.5 bg-cyan-950/30 border border-cyan-500/40 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-bold text-cyan-300">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                      24/7 Public Cloudflare Link:
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
+                      ● Active (Runs while host is on)
+                    </span>
+                  </div>
 
-            {/* Room ID Badge */}
-            <div className="flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl">
-              <div className="text-xs">
-                <span className="text-slate-400">Room Code: </span>
-                <span className="font-mono font-semibold text-white ml-1">{roomId}</span>
-              </div>
-              <button
-                onClick={() => copyToClipboard(roomId, false)}
-                className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1"
-              >
-                {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                {copiedId ? 'Code Copied' : 'Copy Code'}
-              </button>
-            </div>
-
-            {/* Wi-Fi & Network info */}
-            {networkList.length > 0 && (
-              <div className="p-3 bg-cyan-950/20 border border-cyan-800/30 rounded-xl text-xs space-y-1">
-                <div className="font-medium text-cyan-300 flex items-center gap-1.5">
-                  <Wifi className="w-3.5 h-3.5" /> Same Wi-Fi Access:
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={tunnelUrl}
+                      className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/50 rounded-xl text-xs font-mono text-cyan-200 select-all focus:outline-none"
+                    />
+                    <button
+                      onClick={() => copyToClipboard(tunnelUrl, 'public')}
+                      className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-cyan-600/30"
+                    >
+                      {copiedPublic ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedPublic ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    ✨ Your friends can open this on <strong>iPhone, Android, iPad, or PC anywhere in the world</strong> (no Wi-Fi match needed, works on 4G/5G). It will never disconnect as long as your laptop is running!
+                  </p>
                 </div>
-                <p className="text-slate-300">
-                  Friends on the same Wi-Fi can open <span className="font-mono text-cyan-200">{activeQrUrl}</span> on phones, tablets, or laptops.
-                </p>
-              </div>
-            )}
+              ) : isTunnelLoading ? (
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center space-y-2">
+                  <Loader2 className="w-6 h-6 text-cyan-400 animate-spin mx-auto" />
+                  <div className="text-xs font-semibold text-white">Generating 24/7 Worldwide Link...</div>
+                  <p className="text-[11px] text-slate-400">Connecting your laptop to the Cloudflare edge network.</p>
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center space-y-3">
+                  <p className="text-xs text-slate-300">
+                    Want your friends on mobile data or at their own homes to join?
+                  </p>
+                  <button
+                    onClick={handleStartTunnel}
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Generate 24/7 Public Link Now
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
-            {/* Remote Internet Access Note */}
-            <div className="p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl text-xs space-y-1">
-              <div className="font-medium text-slate-300 flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-indigo-400" /> Mobile Data / Remote Friends:
+          {/* Local Wi-Fi Link Section */}
+          {linkType === 'wifi' && (
+            <div className="w-full mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 mb-1.5 block">
+                  Wi-Fi Network Link
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={networkUrl}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => copyToClipboard(networkUrl, 'link')}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition shrink-0"
+                  >
+                    {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedLink ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
               </div>
-              <p className="text-slate-400">
-                To invite friends outside your Wi-Fi, run <code className="px-1.5 py-0.5 bg-slate-900 text-cyan-400 rounded">npx untun tunnel 3000</code> or Cloudflare Tunnel to share a public link!
+              <p className="text-[11px] text-slate-400">
+                Works for any device connected to the same home or office Wi-Fi network.
               </p>
             </div>
+          )}
+
+          {/* Room Code Badge */}
+          <div className="w-full mt-3 flex items-center justify-between p-2.5 bg-slate-950/60 border border-slate-800/80 rounded-xl text-xs">
+            <div>
+              <span className="text-slate-400">Room Code: </span>
+              <span className="font-mono font-semibold text-white ml-1">{roomId}</span>
+            </div>
+            <button
+              onClick={() => copyToClipboard(roomId, 'id')}
+              className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1"
+            >
+              {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedId ? 'Code Copied' : 'Copy Code'}
+            </button>
           </div>
         </div>
 
