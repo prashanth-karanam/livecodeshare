@@ -24,6 +24,7 @@ import { ChatDrawer, type ChatMessage } from '../components/ChatDrawer';
 import { ShareModal } from '../components/ShareModal';
 import { MobileQuickKeys } from '../components/MobileQuickKeys';
 import { getApiUrl } from '../utils/api';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 interface RoomUser {
   id: string;
@@ -226,8 +227,8 @@ export const RoomPage: React.FC<RoomPageProps> = ({
   }, [code, languageId, stdin]);
 
   // Copy code
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(code);
+  const handleCopyCode = async () => {
+    await copyTextToClipboard(code);
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2000);
   };

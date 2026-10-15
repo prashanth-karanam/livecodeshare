@@ -15,9 +15,11 @@ import {
   Clock,
   Copy,
   Check,
-  Loader2
+  Loader2,
+  Share2
 } from 'lucide-react';
 import { getApiUrl } from '../utils/api';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 interface LandingPageProps {
   onCreateRoom: (customName: string) => void;
@@ -73,11 +75,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     }
   };
 
-  const copyTunnelUrl = () => {
+  const copyTunnelUrl = async () => {
     if (!tunnelUrl) return;
-    navigator.clipboard.writeText(tunnelUrl);
+    await copyTextToClipboard(tunnelUrl);
     setCopiedTunnel(true);
     setTimeout(() => setCopiedTunnel(false), 2000);
+  };
+
+  const handleNativeShare = async () => {
+    if (!tunnelUrl) return;
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'LiveCodeShare - Code With Me',
+          text: 'Join my live collaborative coding session on LiveCodeShare:',
+          url: tunnelUrl
+        });
+        return;
+      } catch (err) {
+        // User cancelled or share dismissed, fall back to copy
+      }
+    }
+    await copyTunnelUrl();
   };
 
   const handleCreate = () => {
@@ -257,7 +276,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     type="text"
                     readOnly
                     value={tunnelUrl}
-                    className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/40 rounded-xl text-xs font-mono text-cyan-200 select-all focus:outline-none"
+                    onClick={(e) => e.currentTarget.select()}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/40 rounded-xl text-xs font-mono text-cyan-200 cursor-pointer select-all focus:outline-none focus:border-cyan-400"
                   />
                   <button
                     onClick={copyTunnelUrl}
@@ -266,6 +287,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     {copiedTunnel ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedTunnel ? 'Copied' : 'Copy'}
                   </button>
+                  {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                    <button
+                      onClick={handleNativeShare}
+                      title="Share link"
+                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-emerald-600/30"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Share</span>
+                    </button>
+                  )}
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                   Send this link to friends on <strong>any device or network</strong>. It remains online 24/7 as long as your laptop is on!

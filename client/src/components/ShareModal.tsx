@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, X, Globe, Wifi, Sparkles, Loader2 } from 'lucide-react';
+import { Copy, Check, X, Globe, Wifi, Sparkles, Loader2, Share2 } from 'lucide-react';
 import { getApiUrl } from '../utils/api';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 interface ShareModalProps {
   roomId: string;
@@ -80,8 +81,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
     }
   };
 
-  const copyToClipboard = (text: string, type: 'link' | 'id' | 'public') => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string, type: 'link' | 'id' | 'public') => {
+    await copyTextToClipboard(text);
     if (type === 'public') {
       setCopiedPublic(true);
       setTimeout(() => setCopiedPublic(false), 2000);
@@ -92,6 +93,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
       setCopiedId(true);
       setTimeout(() => setCopiedId(false), 2000);
     }
+  };
+
+  const handleNativeShare = async (url: string) => {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: `LiveCodeShare Room ${roomId}`,
+          text: `Join my live collaborative coding room on LiveCodeShare:`,
+          url
+        });
+        return;
+      } catch (err) {
+        // user cancelled or share failed, fallback to copy
+      }
+    }
+    await copyToClipboard(url, linkType === 'public' ? 'public' : 'link');
   };
 
   const activeUrl = linkType === 'public' && tunnelUrl ? tunnelUrl : networkUrl || `${window.location.origin}${roomPath}`;
@@ -182,7 +199,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
                       type="text"
                       readOnly
                       value={tunnelUrl}
-                      className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/50 rounded-xl text-xs font-mono text-cyan-200 select-all focus:outline-none"
+                      onClick={(e) => e.currentTarget.select()}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/50 rounded-xl text-xs font-mono text-cyan-200 cursor-pointer select-all focus:outline-none focus:border-cyan-400"
                     />
                     <button
                       onClick={() => copyToClipboard(tunnelUrl, 'public')}
@@ -191,6 +210,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
                       {copiedPublic ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                       {copiedPublic ? 'Copied' : 'Copy'}
                     </button>
+                    {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                      <button
+                        onClick={() => handleNativeShare(tunnelUrl)}
+                        title="Share link"
+                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-emerald-600/30"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>Share</span>
+                      </button>
+                    )}
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
                     ✨ Your friends can open this on <strong>iPhone, Android, iPad, or PC anywhere in the world</strong> (no Wi-Fi match needed, works on 4G/5G). It will never disconnect as long as your laptop is running!
@@ -231,7 +260,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
                     type="text"
                     readOnly
                     value={networkUrl}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none"
+                    onClick={(e) => e.currentTarget.select()}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-cyan-300 cursor-pointer select-all focus:outline-none focus:border-cyan-400"
                   />
                   <button
                     onClick={() => copyToClipboard(networkUrl, 'link')}
@@ -240,6 +271,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
                     {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedLink ? 'Copied' : 'Copy'}
                   </button>
+                  {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                    <button
+                      onClick={() => handleNativeShare(networkUrl)}
+                      title="Share link"
+                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Share</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <p className="text-[11px] text-slate-400">
