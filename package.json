@@ -1,0 +1,19 @@
+{
+  "name": "livecodeshare",
+  "version": "1.0.0",
+  "description": "Real-time collaborative code editor and live code sharing platform",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "install:client": "npm --prefix client install",
+    "build:client": "npm --prefix client run build",
+    "build": "npm run install:client && npm run build:client",
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
