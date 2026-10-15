@@ -14,18 +14,19 @@ export function getBackendUrl(): string {
   // 2. Check localStorage
   try {
     const saved = localStorage.getItem('lcs_backend_url');
-    if (saved && window.location.hostname.includes('github.io')) {
+    if (saved) {
       return saved;
     }
   } catch (e) {}
 
-  // 3. If hosted on github.io without custom server, connect to laptop's tunnel
-  if (window.location.hostname.includes('github.io')) {
-    return 'https://smart-animals-love.loca.lt';
-  }
-
-  // 4. Default: self-hosted on same origin
+  // 3. If hosted on same origin (Laptop server http://localhost:3000 or http://10.3.103.31:3000)
   return '/';
+}
+
+export function setBackendUrl(url: string): void {
+  try {
+    localStorage.setItem('lcs_backend_url', url);
+  } catch (e) {}
 }
 
 export function getApiUrl(endpoint: string): string {

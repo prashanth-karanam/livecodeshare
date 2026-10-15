@@ -99,6 +99,17 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#070d18] text-slate-100 flex flex-col font-sans">
+      {typeof window !== 'undefined' && window.location.hostname.includes('github.io') && !isConnected && (
+        <div className="bg-amber-950/80 border-b border-amber-800/60 text-amber-200 px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2 shadow-lg">
+          <div className="flex items-center gap-2">
+            <span className="p-1 rounded bg-amber-500/20 text-amber-400 font-bold">Laptop Server Notice:</span>
+            <span>
+              GitHub Pages is a static file host. Your laptop server is running at <strong className="text-white">http://localhost:3000</strong> (on this laptop) or <strong className="text-white">http://10.3.103.31:3000</strong> (for phones/tablets on Wi-Fi).
+            </span>
+          </div>
+        </div>
+      )}
+
       {!currentRoomId && (
         <Navbar
           onGoHome={handleGoHome}
