@@ -1,52 +1,61 @@
+import copy from 'copy-to-clipboard';
+
 /**
- * Robust clipboard copy function with fallback for insecure origins (HTTP),
- * older mobile devices, iOS Safari, Android, and strict permissions contexts.
+ * Universal clipboard copy function that works reliably across:
+ * - HTTPS origins (trycloudflare.com, github.io, vercel.app)
+ * - Insecure HTTP origins (10.x.x.x local network, mobile IP)
+ * - Mobile Safari (iOS) & Chrome (Android)
+ * - Tablets, desktops, and embedded WebViews
+ * - With fallback to window.prompt if programmatic clipboard is strictly blocked
  */
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
-  // 1. Try modern navigator.clipboard API if available (works on HTTPS or localhost)
-  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (err) {
-      console.warn('navigator.clipboard.writeText failed, trying execCommand fallback...', err);
-    }
+  try {
+    const success = await copy(text, {
+      fallbackToPrompt: true,
+      message: 'Press #{key} to copy room link:',
+      debug: false,
+    });
+    if (success) return true;
+  } catch (err) {
+    console.warn('copy-to-clipboard primary attempt error:', err);
   }
 
-  // 2. Fallback: textarea with document.execCommand('copy') for HTTP/older devices/mobile
+  // Direct DOM textarea fallback
   try {
     const textArea = document.createElement('textarea');
     textArea.value = text;
     textArea.style.position = 'fixed';
-    textArea.style.top = '-9999px';
-    textArea.style.left = '-9999px';
-    textArea.style.opacity = '0';
-    textArea.setAttribute('readonly', '');
-
+    textArea.style.top = '0';
+    textArea.style.left = '0';
+    textArea.style.width = '2em';
+    textArea.style.height = '2em';
+    textArea.style.padding = '0';
+    textArea.style.border = 'none';
+    textArea.style.outline = 'none';
+    textArea.style.boxShadow = 'none';
+    textArea.style.background = 'transparent';
     document.body.appendChild(textArea);
-
-    // iOS selection support
-    const isIOS = typeof navigator !== 'undefined' && navigator.userAgent.match(/ipad|ipod|iphone/i);
-    if (isIOS) {
-      const range = document.createRange();
-      range.selectNodeContents(textArea);
-      const selection = window.getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      textArea.setSelectionRange(0, 999999);
-    } else {
-      textArea.select();
-    }
-
+    textArea.focus();
+    textArea.select();
+    textArea.setSelectionRange(0, text.length);
     const successful = document.execCommand('copy');
     document.body.removeChild(textArea);
-    return successful;
+    if (successful) return true;
   } catch (err) {
-    console.error('execCommand copy fallback failed:', err);
-    return false;
+    console.warn('execCommand direct fallback error:', err);
   }
+
+  // Last-resort fallback: prompt user with pre-selected text to copy
+  try {
+    if (typeof window !== 'undefined') {
+      window.prompt('Copy this link (Ctrl+C / Cmd+C / tap Copy):', text);
+      return true;
+    }
+  } catch (e) {
+    console.error('All clipboard methods failed:', e);
+  }
+
+  return false;
 }

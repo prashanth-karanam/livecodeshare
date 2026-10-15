@@ -17,7 +17,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
 
   const [linkType, setLinkType] = useState<'public' | 'wifi'>('public');
   const [networkUrl, setNetworkUrl] = useState<string>('');
-  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(() => {
+    if (typeof window !== 'undefined' && (window.location.origin.includes('.trycloudflare.com') || window.location.origin.includes('vercel.app'))) {
+      return `${window.location.origin}/room/${roomId}`;
+    }
+    return null;
+  });
   const [isTunnelLoading, setIsTunnelLoading] = useState<boolean>(false);
 
   const roomPath = `/room/${roomId}`;
@@ -82,7 +87,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
   };
 
   const copyToClipboard = async (text: string, type: 'link' | 'id' | 'public') => {
-    await copyTextToClipboard(text);
+    const fallbackUrl = typeof window !== 'undefined' ? `${window.location.origin}${roomPath}` : '';
+    const target = text || activeUrl || fallbackUrl;
+    await copyTextToClipboard(target);
     if (type === 'public') {
       setCopiedPublic(true);
       setTimeout(() => setCopiedPublic(false), 2000);
@@ -96,22 +103,26 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
   };
 
   const handleNativeShare = async (url: string) => {
+    const fallbackUrl = typeof window !== 'undefined' ? `${window.location.origin}${roomPath}` : '';
+    const shareUrl = url || activeUrl || fallbackUrl;
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title: `LiveCodeShare Room ${roomId}`,
           text: `Join my live collaborative coding room on LiveCodeShare:`,
-          url
+          url: shareUrl
         });
         return;
       } catch (err) {
         // user cancelled or share failed, fallback to copy
       }
     }
-    await copyToClipboard(url, linkType === 'public' ? 'public' : 'link');
+    await copyToClipboard(shareUrl, linkType === 'public' ? 'public' : 'link');
   };
 
-  const activeUrl = linkType === 'public' && tunnelUrl ? tunnelUrl : networkUrl || `${window.location.origin}${roomPath}`;
+  const currentOriginRoom = typeof window !== 'undefined' ? `${window.location.origin}${roomPath}` : '';
+  const publicShareUrl = tunnelUrl || (typeof window !== 'undefined' && window.location.origin.includes('trycloudflare') ? currentOriginRoom : null);
+  const activeUrl = linkType === 'public' ? (publicShareUrl || currentOriginRoom) : (networkUrl || currentOriginRoom);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
@@ -182,7 +193,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
           {/* Public 24/7 Link Section */}
           {linkType === 'public' && (
             <div className="w-full mt-4 space-y-3">
-              {tunnelUrl ? (
+              {publicShareUrl ? (
                 <div className="p-3.5 bg-cyan-950/30 border border-cyan-500/40 rounded-xl space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="flex items-center gap-1.5 font-bold text-cyan-300">
@@ -198,13 +209,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
                     <input
                       type="text"
                       readOnly
-                      value={tunnelUrl}
+                      value={publicShareUrl}
                       onClick={(e) => e.currentTarget.select()}
                       onFocus={(e) => e.currentTarget.select()}
                       className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/50 rounded-xl text-xs font-mono text-cyan-200 cursor-pointer select-all focus:outline-none focus:border-cyan-400"
                     />
                     <button
-                      onClick={() => copyToClipboard(tunnelUrl, 'public')}
+                      onClick={() => copyToClipboard(publicShareUrl, 'public')}
                       className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-cyan-600/30"
                     >
                       {copiedPublic ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -212,7 +223,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
                     </button>
                     {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
                       <button
-                        onClick={() => handleNativeShare(tunnelUrl)}
+                        onClick={() => handleNativeShare(publicShareUrl)}
                         title="Share link"
                         className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 shadow-lg shadow-emerald-600/30"
                       >

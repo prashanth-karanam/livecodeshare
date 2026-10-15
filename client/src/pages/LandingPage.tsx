@@ -34,7 +34,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 }) => {
   const [roomIdInput, setRoomIdInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
-  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const origin = window.location.origin;
+      if (origin.includes('.trycloudflare.com') || origin.includes('vercel.app')) {
+        return origin;
+      }
+    }
+    return null;
+  });
   const [isTunnelLoading, setIsTunnelLoading] = useState<boolean>(false);
   const [copiedTunnel, setCopiedTunnel] = useState<boolean>(false);
 
@@ -76,20 +84,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   };
 
   const copyTunnelUrl = async () => {
-    if (!tunnelUrl) return;
-    await copyTextToClipboard(tunnelUrl);
+    const urlToCopy = tunnelUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (!urlToCopy) return;
+    await copyTextToClipboard(urlToCopy);
     setCopiedTunnel(true);
     setTimeout(() => setCopiedTunnel(false), 2000);
   };
 
   const handleNativeShare = async () => {
-    if (!tunnelUrl) return;
+    const urlToShare = tunnelUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (!urlToShare) return;
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title: 'LiveCodeShare - Code With Me',
           text: 'Join my live collaborative coding session on LiveCodeShare:',
-          url: tunnelUrl
+          url: urlToShare
         });
         return;
       } catch (err) {

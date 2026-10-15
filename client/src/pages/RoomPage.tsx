@@ -71,6 +71,7 @@ export const RoomPage: React.FC<RoomPageProps> = ({
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [stdin, setStdin] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+  const [copiedRoomLink, setCopiedRoomLink] = useState<boolean>(false);
 
   // Refs
   const isRemoteUpdate = useRef<boolean>(false);
@@ -292,6 +293,20 @@ export const RoomPage: React.FC<RoomPageProps> = ({
             <span className="text-slate-400">Room:</span>
             <span className="font-mono font-semibold text-cyan-300">{roomId}</span>
             <Share2 className="w-3 h-3 text-cyan-400 ml-1" />
+          </button>
+
+          {/* Quick Copy Link Button */}
+          <button
+            onClick={async () => {
+              await copyTextToClipboard(window.location.href);
+              setCopiedRoomLink(true);
+              setTimeout(() => setCopiedRoomLink(false), 2000);
+            }}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-cyan-950/40 hover:bg-cyan-900/40 border border-cyan-800/50 rounded-lg text-cyan-300 text-xs font-medium transition active:scale-95"
+            title="Quick copy direct room link"
+          >
+            {copiedRoomLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            <span>{copiedRoomLink ? 'Copied Link' : 'Copy Link'}</span>
           </button>
 
           {/* Active Collaborators count & avatars */}
