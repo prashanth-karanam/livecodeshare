@@ -5,7 +5,7 @@ import cors from 'cors';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { startTunnel } from 'untun';
 
@@ -27,6 +27,32 @@ app.use(express.json());
 
 // In-memory room store
 const rooms = new Map();
+
+// Active interactive terminal processes per room (roomId -> { child, tempDir })
+const roomProcesses = new Map();
+
+function killRoomProcess(roomId) {
+  const procInfo = roomProcesses.get(roomId);
+  if (!procInfo) return;
+  roomProcesses.delete(roomId);
+  const { child, tempDir } = procInfo;
+  if (child && child.pid) {
+    try {
+      if (process.platform === 'win32') {
+        exec(`taskkill /pid ${child.pid} /T /F`, () => {});
+      } else {
+        child.kill('SIGKILL');
+      }
+    } catch (e) {}
+  }
+  if (tempDir) {
+    setTimeout(() => {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (e) {}
+    }, 1500);
+  }
+}
 
 // Cloudflare 24/7 Tunnel State
 let activeTunnel = null;
@@ -263,6 +289,7 @@ io.on('connection', (socket) => {
     socket.to(currentRoomId).emit('chat-message', leaveMsg);
 
     if (room.users.size === 0) {
+      killRoomProcess(currentRoomId);
       setTimeout(() => {
         const checkRoom = rooms.get(currentRoomId);
         if (checkRoom && checkRoom.users.size === 0) {
@@ -270,6 +297,198 @@ io.on('connection', (socket) => {
         }
       }, 30 * 60 * 1000);
     }
+  });
+
+  // --- Live Interactive Terminal Event Handlers ---
+  socket.on('terminal:run', async ({ roomId, language, code }) => {
+    const targetRoom = roomId || currentRoomId;
+    if (!targetRoom) return;
+    killRoomProcess(targetRoom);
+
+    io.to(targetRoom).emit('terminal:status', { running: true, mode: language?.toUpperCase() || 'RUN' });
+    io.to(targetRoom).emit('terminal:data', `\r\n\x1b[36m🚀 Executing ${language || 'script'} in interactive terminal...\x1b[0m\r\n`);
+
+    const tempDir = path.join(os.tmpdir(), `lcs-term-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    try {
+      fs.mkdirSync(tempDir, { recursive: true });
+    } catch (e) {}
+
+    let cmd = '';
+    let args = [];
+
+    if (language === 'python') {
+      const scriptPath = path.join(tempDir, 'main.py');
+      fs.writeFileSync(scriptPath, code);
+      cmd = 'python';
+      args = ['-u', scriptPath];
+    } else if (language === 'javascript' || language === 'typescript') {
+      const scriptPath = path.join(tempDir, 'main.mjs');
+      fs.writeFileSync(scriptPath, code);
+      cmd = process.execPath;
+      args = [scriptPath];
+    } else if (language === 'cpp') {
+      io.to(targetRoom).emit('terminal:data', `\x1b[90m⚙️ Compiling with g++...\x1b[0m\r\n`);
+      const srcPath = path.join(tempDir, 'main.cpp');
+      const exePath = path.join(tempDir, 'main.exe');
+      fs.writeFileSync(srcPath, code);
+
+      const compileResult = await runCommandInSandbox('g++', ['-O2', srcPath, '-o', exePath], { cwd: tempDir });
+      if (compileResult.code !== 0) {
+        io.to(targetRoom).emit('terminal:data', `\r\n\x1b[31m${cleanOutput(compileResult.stderr || compileResult.stdout, tempDir)}\x1b[0m\r\n`);
+        io.to(targetRoom).emit('terminal:exit', { code: compileResult.code });
+        io.to(targetRoom).emit('terminal:status', { running: false });
+        return;
+      }
+      io.to(targetRoom).emit('terminal:data', `\x1b[32m✔ Build successful!\x1b[0m\r\n\r\n`);
+      cmd = exePath;
+      args = [];
+    } else if (language === 'c') {
+      io.to(targetRoom).emit('terminal:data', `\x1b[90m⚙️ Compiling with gcc...\x1b[0m\r\n`);
+      const srcPath = path.join(tempDir, 'main.c');
+      const exePath = path.join(tempDir, 'main.exe');
+      fs.writeFileSync(srcPath, code);
+
+      const compileResult = await runCommandInSandbox('gcc', ['-O2', srcPath, '-o', exePath], { cwd: tempDir });
+      if (compileResult.code !== 0) {
+        io.to(targetRoom).emit('terminal:data', `\r\n\x1b[31m${cleanOutput(compileResult.stderr || compileResult.stdout, tempDir)}\x1b[0m\r\n`);
+        io.to(targetRoom).emit('terminal:exit', { code: compileResult.code });
+        io.to(targetRoom).emit('terminal:status', { running: false });
+        return;
+      }
+      io.to(targetRoom).emit('terminal:data', `\x1b[32m✔ Build successful!\x1b[0m\r\n\r\n`);
+      cmd = exePath;
+      args = [];
+    } else {
+      io.to(targetRoom).emit('terminal:data', `\r\n\x1b[33mInteractive terminal supports Python, Node.js, C, and C++ locally on your server.\x1b[0m\r\n`);
+      io.to(targetRoom).emit('terminal:status', { running: false });
+      return;
+    }
+
+    try {
+      const child = spawn(cmd, args, {
+        cwd: tempDir,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+          FORCE_COLOR: '1'
+        }
+      });
+
+      roomProcesses.set(targetRoom, { child, tempDir });
+
+      child.stdout.on('data', (chunk) => {
+        io.to(targetRoom).emit('terminal:data', cleanOutput(chunk.toString(), tempDir));
+      });
+
+      child.stderr.on('data', (chunk) => {
+        io.to(targetRoom).emit('terminal:data', cleanOutput(chunk.toString(), tempDir));
+      });
+
+      child.on('close', (code) => {
+        io.to(targetRoom).emit('terminal:data', `\r\n\x1b[90m[Process finished with exit code ${code === null ? 0 : code}]\x1b[0m\r\n`);
+        io.to(targetRoom).emit('terminal:exit', { code: code === null ? 0 : code });
+        io.to(targetRoom).emit('terminal:status', { running: false });
+        roomProcesses.delete(targetRoom);
+        try {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch (e) {}
+      });
+
+      child.on('error', (err) => {
+        io.to(targetRoom).emit('terminal:data', `\r\n\x1b[31m[Execution error: ${err.message}]\x1b[0m\r\n`);
+        io.to(targetRoom).emit('terminal:exit', { code: 1 });
+        io.to(targetRoom).emit('terminal:status', { running: false });
+        roomProcesses.delete(targetRoom);
+      });
+    } catch (err) {
+      io.to(targetRoom).emit('terminal:data', `\r\n\x1b[31mFailed to start process: ${err.message}\x1b[0m\r\n`);
+      io.to(targetRoom).emit('terminal:status', { running: false });
+    }
+  });
+
+  socket.on('terminal:shell', ({ roomId, shellType }) => {
+    const targetRoom = roomId || currentRoomId;
+    if (!targetRoom) return;
+    killRoomProcess(targetRoom);
+
+    let cmd = '';
+    let args = [];
+    let modeLabel = '';
+
+    if (shellType === 'python') {
+      cmd = 'python';
+      args = ['-i', '-u'];
+      modeLabel = 'Python REPL';
+    } else if (shellType === 'node') {
+      cmd = process.execPath;
+      args = ['-i'];
+      modeLabel = 'Node.js REPL';
+    } else {
+      cmd = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+      args = process.platform === 'win32' ? ['-NoLogo'] : [];
+      modeLabel = 'PowerShell';
+    }
+
+    io.to(targetRoom).emit('terminal:status', { running: true, mode: modeLabel });
+    io.to(targetRoom).emit('terminal:data', `\r\n\x1b[35m💻 Started ${modeLabel} session...\x1b[0m\r\n`);
+
+    try {
+      const child = spawn(cmd, args, {
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+          FORCE_COLOR: '1'
+        }
+      });
+
+      roomProcesses.set(targetRoom, { child, tempDir: null });
+
+      child.stdout.on('data', (chunk) => {
+        io.to(targetRoom).emit('terminal:data', chunk.toString());
+      });
+
+      child.stderr.on('data', (chunk) => {
+        io.to(targetRoom).emit('terminal:data', chunk.toString());
+      });
+
+      child.on('close', (code) => {
+        io.to(targetRoom).emit('terminal:data', `\r\n\x1b[90m[${modeLabel} closed with code ${code === null ? 0 : code}]\x1b[0m\r\n`);
+        io.to(targetRoom).emit('terminal:exit', { code: code === null ? 0 : code });
+        io.to(targetRoom).emit('terminal:status', { running: false });
+        roomProcesses.delete(targetRoom);
+      });
+
+      child.on('error', (err) => {
+        io.to(targetRoom).emit('terminal:data', `\r\n\x1b[31m[Shell error: ${err.message}]\x1b[0m\r\n`);
+        io.to(targetRoom).emit('terminal:exit', { code: 1 });
+        io.to(targetRoom).emit('terminal:status', { running: false });
+        roomProcesses.delete(targetRoom);
+      });
+    } catch (err) {
+      io.to(targetRoom).emit('terminal:data', `\r\n\x1b[31mFailed to start shell: ${err.message}\x1b[0m\r\n`);
+      io.to(targetRoom).emit('terminal:status', { running: false });
+    }
+  });
+
+  socket.on('terminal:input', ({ roomId, data }) => {
+    const targetRoom = roomId || currentRoomId;
+    if (!targetRoom) return;
+    const procInfo = roomProcesses.get(targetRoom);
+    if (procInfo && procInfo.child && procInfo.child.stdin && procInfo.child.stdin.writable) {
+      try {
+        procInfo.child.stdin.write(data);
+      } catch (e) {
+        console.warn('Failed to write to stdin:', e);
+      }
+    }
+  });
+
+  socket.on('terminal:kill', ({ roomId }) => {
+    const targetRoom = roomId || currentRoomId;
+    if (!targetRoom) return;
+    killRoomProcess(targetRoom);
+    io.to(targetRoom).emit('terminal:data', `\r\n\x1b[33m^C [Process terminated by user]\x1b[0m\r\n`);
+    io.to(targetRoom).emit('terminal:status', { running: false });
   });
 });
 

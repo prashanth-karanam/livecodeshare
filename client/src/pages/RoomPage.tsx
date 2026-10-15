@@ -18,12 +18,11 @@ import {
 
 import { SUPPORTED_LANGUAGES, type LanguageDef } from '../utils/languages';
 import { THEME_OPTIONS, type ThemeOption } from '../utils/themes';
-import { ConsoleOutput } from '../components/ConsoleOutput';
+import { InteractiveTerminal } from '../components/InteractiveTerminal';
 import { WebPreview } from '../components/WebPreview';
 import { ChatDrawer, type ChatMessage } from '../components/ChatDrawer';
 import { ShareModal } from '../components/ShareModal';
 import { MobileQuickKeys } from '../components/MobileQuickKeys';
-import { getApiUrl } from '../utils/api';
 import { copyTextToClipboard } from '../utils/clipboard';
 
 interface RoomUser {
@@ -60,16 +59,11 @@ export const RoomPage: React.FC<RoomPageProps> = ({
   // Modals & Panels
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
-  const [activeSidePanel, setActiveSidePanel] = useState<'console' | 'preview'>('console');
+  const [activeSidePanel, setActiveSidePanel] = useState<'terminal' | 'preview'>('terminal');
   const [mobileTab, setMobileTab] = useState<'editor' | 'output'>('editor');
 
   // Execution
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [consoleOutput, setConsoleOutput] = useState<string>('');
-  const [consoleStderr, setConsoleStderr] = useState<string>('');
-  const [executionTime, setExecutionTime] = useState<number | null>(null);
-  const [exitCode, setExitCode] = useState<number | null>(null);
-  const [stdin, setStdin] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [copiedRoomLink, setCopiedRoomLink] = useState<boolean>(false);
 
@@ -164,58 +158,23 @@ export const RoomPage: React.FC<RoomPageProps> = ({
     }
   };
 
-  // Run code handler
-  const handleRunCode = async () => {
+  // Run code handler (Interactive Terminal)
+  const handleRunCode = useCallback(() => {
     if (!currentLanguage.isRunnable) return;
 
-    setIsRunning(true);
-    setConsoleOutput('');
-    setConsoleStderr('');
-    setExitCode(null);
-    setExecutionTime(null);
     setMobileTab('output');
-    setActiveSidePanel('console');
+    setActiveSidePanel('terminal');
 
-    const startTime = performance.now();
-
-    try {
-      const response = await fetch(getApiUrl('/api/execute'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          language: languageId,
-          code,
-          stdin
-        })
+    if (socket) {
+      socket.emit('terminal:run', {
+        roomId,
+        language: languageId,
+        code
       });
-
-      const elapsed = Math.round(performance.now() - startTime);
-      setExecutionTime(elapsed);
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setConsoleStderr(data.error || 'Execution failed');
-        setExitCode(1);
-      } else if (data.run) {
-        setConsoleOutput(data.run.stdout || '');
-        setConsoleStderr(data.run.stderr || '');
-        setExitCode(data.run.code !== undefined ? data.run.code : 0);
-      } else {
-        setConsoleOutput(JSON.stringify(data, null, 2));
-        setExitCode(0);
-      }
-    } catch (err: any) {
-      const elapsed = Math.round(performance.now() - startTime);
-      setExecutionTime(elapsed);
-      setConsoleStderr(`Error connecting to execution server: ${err.message}`);
-      setExitCode(1);
-    } finally {
-      setIsRunning(false);
     }
-  };
+  }, [currentLanguage.isRunnable, socket, roomId, languageId, code]);
 
-  // Keyboard shortcut Ctrl+Enter / Cmd+Enter to run
+  // Keyboard shortcut Ctrl+Enter / Cmd+Enter to run in terminal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -225,7 +184,21 @@ export const RoomPage: React.FC<RoomPageProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [code, languageId, stdin]);
+  }, [handleRunCode]);
+
+  // Terminal process status listener
+  useEffect(() => {
+    if (!socket) return;
+    const handleStatus = ({ running }: { running: boolean }) => {
+      setIsRunning(running);
+    };
+    socket.on('terminal:status', handleStatus);
+    socket.on('terminal:exit', () => setIsRunning(false));
+    return () => {
+      socket.off('terminal:status', handleStatus);
+      socket.off('terminal:exit');
+    };
+  }, [socket]);
 
   // Copy code
   const handleCopyCode = async () => {
@@ -507,15 +480,11 @@ export const RoomPage: React.FC<RoomPageProps> = ({
             </>
           ) : (
             <>
-              <TerminalIcon className="w-3.5 h-3.5" /> Output Console
+              <TerminalIcon className="w-3.5 h-3.5" /> Interactive Terminal
             </>
           )}
-          {exitCode !== null && (
-            <span
-              className={`w-2 h-2 rounded-full ${
-                exitCode === 0 ? 'bg-emerald-400' : 'bg-rose-400'
-              }`}
-            />
+          {isRunning && (
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           )}
         </button>
       </div>
@@ -579,22 +548,11 @@ export const RoomPage: React.FC<RoomPageProps> = ({
           {currentLanguage.canWebPreview && activeSidePanel === 'preview' ? (
             <WebPreview code={code} />
           ) : (
-            <ConsoleOutput
-              output={consoleOutput}
-              stderr={consoleStderr}
-              isLoading={isRunning}
-              executionTime={executionTime}
-              exitCode={exitCode}
-              onClear={() => {
-                setConsoleOutput('');
-                setConsoleStderr('');
-                setExitCode(null);
-                setExecutionTime(null);
-              }}
-              stdin={stdin}
-              setStdin={setStdin}
-              onRun={handleRunCode}
-              isRunnable={currentLanguage.isRunnable}
+            <InteractiveTerminal
+              roomId={roomId}
+              socket={socket}
+              code={code}
+              languageId={languageId}
             />
           )}
         </div>
