@@ -23,6 +23,7 @@ import { WebPreview } from '../components/WebPreview';
 import { ChatDrawer, type ChatMessage } from '../components/ChatDrawer';
 import { ShareModal } from '../components/ShareModal';
 import { MobileQuickKeys } from '../components/MobileQuickKeys';
+import { getApiUrl } from '../utils/api';
 
 interface RoomUser {
   id: string;
@@ -176,7 +177,7 @@ export const RoomPage: React.FC<RoomPageProps> = ({
     const startTime = performance.now();
 
     try {
-      const response = await fetch('/api/execute', {
+      const response = await fetch(getApiUrl('/api/execute'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

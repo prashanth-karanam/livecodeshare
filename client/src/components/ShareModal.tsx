@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Copy, Check, X, Smartphone, Globe, Wifi } from 'lucide-react';
+import { getApiUrl } from '../utils/api';
 
 interface ShareModalProps {
   roomId: string;
@@ -19,7 +20,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ roomId, isOpen, onClose 
   const shareableUrl = `${currentOrigin}${roomPath}`;
 
   useEffect(() => {
-    fetch('/api/network-info')
+    fetch(getApiUrl('/api/network-info'))
       .then(res => res.json())
       .then(data => {
         if (data.addresses && data.addresses.length > 0) {

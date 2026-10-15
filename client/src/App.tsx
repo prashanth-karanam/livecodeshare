@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { LandingPage } from './pages/LandingPage';
 import { RoomPage } from './pages/RoomPage';
 import { HowToUseModal } from './components/HowToUseModal';
+import { getBackendUrl } from './utils/api';
 
 export const App: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -14,7 +15,8 @@ export const App: React.FC = () => {
 
   // Initialize socket connection once
   useEffect(() => {
-    const s = io('/', {
+    const backendUrl = getBackendUrl();
+    const s = io(backendUrl, {
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000
