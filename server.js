@@ -379,6 +379,17 @@ async function executeViaWandbox(compiler, code, stdin = '') {
   }
 }
 
+function cleanOutput(str, tempDir) {
+  if (!str) return '';
+  const normalized = tempDir.replace(/\\/g, '/');
+  return str
+    .split(`file:///${normalized}/`).join('')
+    .split(`file://${normalized}/`).join('')
+    .split(`${normalized}/`).join('')
+    .split(`${tempDir}\\`).join('')
+    .split(`${tempDir}/`).join('');
+}
+
 // API: Run code
 app.post('/api/execute', async (req, res) => {
   const { language, code, stdin = '' } = req.body;
@@ -398,6 +409,8 @@ app.post('/api/execute', async (req, res) => {
       const scriptPath = path.join(tempDir, 'main.py');
       fs.writeFileSync(scriptPath, code);
       const result = await runCommandInSandbox('python', [scriptPath], { cwd: tempDir }, stdin);
+      result.stdout = cleanOutput(result.stdout, tempDir);
+      result.stderr = cleanOutput(result.stderr, tempDir);
       return res.json({ run: result });
     }
 
@@ -406,6 +419,8 @@ app.post('/api/execute', async (req, res) => {
       const scriptPath = path.join(tempDir, 'main.mjs');
       fs.writeFileSync(scriptPath, code);
       const result = await runCommandInSandbox(process.execPath, [scriptPath], { cwd: tempDir }, stdin);
+      result.stdout = cleanOutput(result.stdout, tempDir);
+      result.stderr = cleanOutput(result.stderr, tempDir);
       return res.json({ run: result });
     }
 
@@ -420,13 +435,15 @@ app.post('/api/execute', async (req, res) => {
         return res.json({
           run: {
             stdout: '',
-            stderr: compileResult.stderr || compileResult.stdout || 'Compilation failed.',
+            stderr: cleanOutput(compileResult.stderr || compileResult.stdout || 'Compilation failed.', tempDir),
             code: compileResult.code
           }
         });
       }
 
       const runResult = await runCommandInSandbox(exePath, [], { cwd: tempDir }, stdin);
+      runResult.stdout = cleanOutput(runResult.stdout, tempDir);
+      runResult.stderr = cleanOutput(runResult.stderr, tempDir);
       return res.json({ run: runResult });
     }
 
@@ -441,13 +458,15 @@ app.post('/api/execute', async (req, res) => {
         return res.json({
           run: {
             stdout: '',
-            stderr: compileResult.stderr || compileResult.stdout || 'Compilation failed.',
+            stderr: cleanOutput(compileResult.stderr || compileResult.stdout || 'Compilation failed.', tempDir),
             code: compileResult.code
           }
         });
       }
 
       const runResult = await runCommandInSandbox(exePath, [], { cwd: tempDir }, stdin);
+      runResult.stdout = cleanOutput(runResult.stdout, tempDir);
+      runResult.stderr = cleanOutput(runResult.stderr, tempDir);
       return res.json({ run: runResult });
     }
 
