@@ -529,9 +529,18 @@ app.get('/api/network-info', (req, res) => {
 
 // Serve frontend in production
 const clientDistPath = path.join(__dirname, 'client', 'dist');
+const assetsPath = path.join(clientDistPath, 'assets');
+
 app.use(express.static(clientDistPath));
+app.use('/assets', express.static(assetsPath));
+app.use('/room/assets', express.static(assetsPath));
 
 app.get('*', (req, res) => {
+  // Never send index.html for missing asset/file requests
+  if (req.path.match(/\.(js|css|map|png|jpg|jpeg|svg|ico|woff|woff2|ttf|eot)$/i)) {
+    return res.status(404).send('Asset not found');
+  }
+
   const indexPath = path.join(clientDistPath, 'index.html');
   res.sendFile(indexPath, (err) => {
     if (err) {
